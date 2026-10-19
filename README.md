@@ -33,17 +33,17 @@ Không commit key hay ID thật vào repo. `CLIENT_ID` và `API_URL` trong `inde
 1. Trong nhóm chat Base Message: bấm dấu "..", chọn **Incoming webhook integration**, copy đường dẫn.
 2. Apps Script > Project Settings > Script Properties: thêm `BASE_WEBHOOK_URL` = đường dẫn vừa copy.
 3. Trong trình soạn thảo chọn hàm `testBase_` và bấm Run: sẽ gửi 1 tin thử vào nhóm, kết quả xem ở Execution log.
-4. Chưa cấu hình `BASE_WEBHOOK_URL` thì app bỏ qua bước này. Lỗi Base không làm hỏng email và Sheet.
+4. Kết quả mỗi lần báo được ghi ở **cột I** của Sheet (`OK 200` là Base nhận được). Lỗi Base không làm hỏng email và Sheet.
 
-Tài liệu Base chưa nêu rõ định dạng gọi trực tiếp; code đang gửi JSON với `bot_name` và `base_content`. Nếu tin không hiện, xem log và chỉnh payload trong `notifyBase_`.
+Tài liệu Base chưa nêu rõ định dạng gọi trực tiếp; code gửi JSON có các trường `base_content`, `text`, `content`, `bot_name`. Nếu cột I báo lỗi hoặc tin không hiện, chỉnh payload trong `notifyBase_` theo nội dung lỗi.
 
 ## Kiểm tra bản Apps Script đang chạy
 Mở địa chỉ `/exec` trong trình duyệt, sẽ thấy `{"ok":true,"version":"..."}`. So với `VERSION` trong `Code.gs` để biết đã deploy bản mới chưa.
 Phải **sửa deployment cũ** (Manage deployments > bút chì > New version). Chọn *New deployment* sẽ tạo địa chỉ `/exec` mới, trong khi `API_URL` trong `index.html` vẫn trỏ về bản cũ.
 
 ## Các cột trong Google Sheet
-A Thời điểm · B Ai báo · C Email · D Địa điểm · E Loại sự cố · F Nội dung · G Link video · H Lời nói gốc (AI chép lại nguyên văn).
-Sheet đã có dữ liệu cũ thì cột H chỉ có từ dòng mới trở đi; tự gõ tiêu đề "Lời nói gốc" vào ô H1 nếu hàng 1 là tiêu đề.
+A Thời điểm · B Ai báo · C Email · D Địa điểm · E Loại sự cố · F Nội dung · G Link video · H Lời nói gốc (AI chép lại nguyên văn) · I Báo Base (kết quả gọi webhook: `OK 200`, `Lỗi 4xx: ...` hoặc `Chưa cấu hình BASE_WEBHOOK_URL`).
+Sheet đã có dữ liệu cũ thì cột H, I chỉ có từ dòng mới trở đi; tự gõ tiêu đề vào ô H1, I1 nếu hàng 1 là tiêu đề.
 
 ## Rủi ro cần kiểm chứng
 1. iPhone/Safari có thể bỏ qua bitrate, file nặng hơn dự kiến: đo dung lượng thật của 60s trên cả 2 loại máy.

@@ -8,7 +8,7 @@
  *
  * Mở địa chỉ /exec trong trình duyệt để xem VERSION đang chạy (biết đã deploy bản mới chưa).
  */
-const VERSION = '2026-10-19.3-cotH-base-retry';
+const VERSION = '2026-10-19.4-cotI-base-status';
 const MODEL = 'gemini-3.6-flash'; // kiểm tra model còn dùng free trong AI Studio, sai thì đổi tên
 const TZ = 'Asia/Ho_Chi_Minh';
 const MAX_B64_LEN = 14e6; // ~10 MB video
@@ -45,15 +45,15 @@ function doPost(e) {
     }
 
     sendMail_(to, when, user, r, file.getUrl());
+
+    // Báo về nhóm chat Base Message. notifyBase_ không ném lỗi, chỉ trả về chuỗi trạng thái để ghi vào cột I.
+    const baseStatus = notifyBase_(when, user, r, file.getUrl());
+
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
     ensureHeader_(sheet);
-    // Cột A–G giữ nguyên thứ tự cũ; cột H (mới) = lời nói gốc. Ô Sheet tối đa 50.000 ký tự nên cắt bớt.
+    // Cột A–G giữ nguyên thứ tự cũ; H = lời nói gốc (ô Sheet tối đa 50.000 ký tự nên cắt bớt); I = kết quả báo Base.
     sheet.appendRow([when, user.name, user.email, r.dia_diem, r.loai_su_co, r.noi_dung, file.getUrl(),
-                     String(r.loi_noi || '').slice(0, 40000)]);
-
-    // Báo về nhóm chat Base Message; lỗi ở đây không được làm hỏng báo cáo (email và Sheet đã xong).
-    try { notifyBase_(when, user, r, file.getUrl()); }
-    catch (err) { console.error('Base Message lỗi: ' + err.message); }
+                     String(r.loi_noi || '').slice(0, 40000), baseStatus]);
     return out_({ ok: true });
   } catch (err) {
     return out_({ ok: false, error: String(err.message || err) });
@@ -121,12 +121,40 @@ function sendMail_(to, when, user, r, url) {
 }
 
 // Gửi tin vào nhóm chat Base Message qua "Incoming webhook integration" của nhóm.
-// Tên trường (bot_name, base_content) lấy từ tài liệu webhook Workflow -> Message của Base; tài liệu chưa nêu
-// rõ định dạng gọi trực tiếp, nên chạy testBase_() để kiểm tra, sai thì xem log và chỉnh payload ở đây.
+// Trả về chuỗi trạng thái ("OK 200", "Lỗi 400: ...", "Chưa cấu hình BASE_WEBHOOK_URL") và KHÔNG ném lỗi,
+// để lỗi Base không làm hỏng email và Sheet. Trạng thái được ghi vào cột I của Sheet để dễ kiểm tra.
+// Tài liệu Base chưa nêu rõ định dạng gọi trực tiếp, nên payload chứa nhiều tên trường phổ biến
+// (base_content/bot_name theo tài liệu Workflow -> Message, text/content theo kiểu webhook thông dụng).
+// Thấy lỗi ở cột I thì chỉnh payload tại đây.
 function notifyBase_(when, user, r, url) {
   const hook = P().getProperty('BASE_WEBHOOK_URL');
-  if (!hook) return; // chưa cấu hình thì bỏ qua
-  const text = [
+  try {
+    if (!hook) {
+      console.warn('Chưa cấu hình BASE_WEBHOOK_URL trong Script Properties');
+      return 'Chưa cấu hình BASE_WEBHOOK_URL';
+    }
+    const text = buildBaseText_(when, user, r, url);
+    const res = UrlFetchApp.fetch(hook, {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      payload: JSON.stringify({
+        bot_name: 'Báo sự cố SPM', bot_username: 'bao_su_co_spm',
+        base_content: text, text: text, content: text
+      })
+    });
+    const code = res.getResponseCode();
+    const body = res.getContentText().replace(/\s+/g, ' ').slice(0, 150);
+    console.log('Base Message trả về ' + code + ': ' + body);
+    return (code >= 200 && code < 300 ? 'OK ' : 'Lỗi ') + code + (body ? ': ' + body : '');
+  } catch (err) {
+    // Đường dẫn webhook coi như mật khẩu: che đi nếu thông báo lỗi của Apps Script có kèm theo.
+    const msg = String(err.message).split(hook || '\u0000').join('[webhook]').slice(0, 150);
+    console.error('Base Message lỗi: ' + msg);
+    return 'Lỗi: ' + msg;
+  }
+}
+
+function buildBaseText_(when, user, r, url) {
+  return [
     '**🚨 SỰ CỐ MỚI – SPM**',
     '**Thời điểm:** ' + when,
     '**Ai báo:** ' + user.name + ' (' + user.email + ')',
@@ -135,26 +163,21 @@ function notifyBase_(when, user, r, url) {
     '**Nội dung:** ' + r.noi_dung,
     '**Video:** ' + url
   ].join('\n');
-  const res = UrlFetchApp.fetch(hook, {
-    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    payload: JSON.stringify({ bot_name: 'Báo sự cố SPM', base_content: text })
-  });
-  const code = res.getResponseCode();
-  console.log('Base Message trả về ' + code + ': ' + res.getContentText().slice(0, 200));
-  if (code < 200 || code >= 300) throw new Error('Base ' + code + ': ' + res.getContentText().slice(0, 200));
 }
 
 // Chạy tay trong trình soạn thảo để thử webhook (sẽ gửi 1 tin thử vào nhóm chat). Xem kết quả ở Execution log.
 function testBase_() {
-  notifyBase_(Utilities.formatDate(new Date(), TZ, 'HH:mm dd/MM/yyyy'), { name: 'Tin thử', email: 'test@example.com' },
+  const status = notifyBase_(Utilities.formatDate(new Date(), TZ, 'HH:mm dd/MM/yyyy'),
+    { name: 'Tin thử', email: 'test@example.com' },
     { dia_diem: 'Thử nghiệm', loai_su_co: 'Thử nghiệm', noi_dung: 'Tin thử từ ứng dụng báo sự cố, bỏ qua tin này.' },
     'https://example.com');
+  Logger.log('Kết quả: ' + status);
 }
 
 // Chỉ tạo hàng tiêu đề khi Sheet còn trống hoàn toàn; Sheet đã có dữ liệu thì không đụng vào.
 function ensureHeader_(sheet) {
   if (sheet.getLastRow() === 0) {
-    sheet.appendRow(['Thời điểm', 'Ai báo', 'Email', 'Địa điểm', 'Loại sự cố', 'Nội dung', 'Video', 'Lời nói gốc']);
+    sheet.appendRow(['Thời điểm', 'Ai báo', 'Email', 'Địa điểm', 'Loại sự cố', 'Nội dung', 'Video', 'Lời nói gốc', 'Báo Base']);
     sheet.setFrozenRows(1);
   }
 }
