@@ -35,7 +35,7 @@ Không commit key hay ID thật vào repo. `CLIENT_ID` và `API_URL` trong `inde
 3. Trong trình soạn thảo chọn hàm `testBase_` và bấm Run: sẽ gửi 1 tin thử vào nhóm, kết quả xem ở Execution log.
 4. Kết quả mỗi lần báo được ghi ở **cột I** của Sheet (`OK 200` là Base nhận được). Lỗi Base không làm hỏng email và Sheet.
 
-Tài liệu Base chưa nêu rõ định dạng gọi trực tiếp; code gửi JSON có các trường `base_content`, `text`, `content`, `bot_name`. Nếu cột I báo lỗi hoặc tin không hiện, chỉnh payload trong `notifyBase_` theo nội dung lỗi.
+Payload theo script đọc đồng hồ SPM đã chạy được: form-urlencoded với `bot_username`, `bot_name`, `base_content` (không gửi JSON). Webhook phải là địa chỉ https của base.vn.
 
 ## Kiểm tra bản Apps Script đang chạy
 Mở địa chỉ `/exec` trong trình duyệt, sẽ thấy `{"ok":true,"version":"..."}`. So với `VERSION` trong `Code.gs` để biết đã deploy bản mới chưa.

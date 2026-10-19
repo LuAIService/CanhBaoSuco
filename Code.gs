@@ -8,7 +8,7 @@
  *
  * Mở địa chỉ /exec trong trình duyệt để xem VERSION đang chạy (biết đã deploy bản mới chưa).
  */
-const VERSION = '2026-10-19.4-cotI-base-status';
+const VERSION = '2026-10-19.5-base-form';
 const MODEL = 'gemini-3.6-flash'; // kiểm tra model còn dùng free trong AI Studio, sai thì đổi tên
 const TZ = 'Asia/Ho_Chi_Minh';
 const MAX_B64_LEN = 14e6; // ~10 MB video
@@ -123,9 +123,8 @@ function sendMail_(to, when, user, r, url) {
 // Gửi tin vào nhóm chat Base Message qua "Incoming webhook integration" của nhóm.
 // Trả về chuỗi trạng thái ("OK 200", "Lỗi 400: ...", "Chưa cấu hình BASE_WEBHOOK_URL") và KHÔNG ném lỗi,
 // để lỗi Base không làm hỏng email và Sheet. Trạng thái được ghi vào cột I của Sheet để dễ kiểm tra.
-// Tài liệu Base chưa nêu rõ định dạng gọi trực tiếp, nên payload chứa nhiều tên trường phổ biến
-// (base_content/bot_name theo tài liệu Workflow -> Message, text/content theo kiểu webhook thông dụng).
-// Thấy lỗi ở cột I thì chỉnh payload tại đây.
+// Định dạng đã kiểm chứng (từ script đọc đồng hồ SPM đang chạy được): form-urlencoded với 3 trường
+// bot_username, bot_name, base_content (hỗ trợ **đậm**, *nghiêng*). KHÔNG gửi JSON.
 function notifyBase_(when, user, r, url) {
   const hook = P().getProperty('BASE_WEBHOOK_URL');
   try {
@@ -133,13 +132,11 @@ function notifyBase_(when, user, r, url) {
       console.warn('Chưa cấu hình BASE_WEBHOOK_URL trong Script Properties');
       return 'Chưa cấu hình BASE_WEBHOOK_URL';
     }
+    if (!/^https:\/\/([a-z0-9-]+\.)*base\.vn\/\S+$/i.test(hook)) return 'Lỗi: BASE_WEBHOOK_URL phải là địa chỉ https của base.vn';
     const text = buildBaseText_(when, user, r, url);
     const res = UrlFetchApp.fetch(hook, {
-      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-      payload: JSON.stringify({
-        bot_name: 'Báo sự cố SPM', bot_username: 'bao_su_co_spm',
-        base_content: text, text: text, content: text
-      })
+      method: 'post', muteHttpExceptions: true,
+      payload: { bot_username: 'bao_su_co_spm', bot_name: 'Báo sự cố SPM', base_content: text } // object => form-urlencoded
     });
     const code = res.getResponseCode();
     const body = res.getContentText().replace(/\s+/g, ' ').slice(0, 150);
