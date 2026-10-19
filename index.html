@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#d32f2f">
+<title>Báo sự cố SPM</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  body{font-family:system-ui,sans-serif;margin:0;padding:16px;text-align:center;background:#111;color:#fff}
+  video{width:100%;max-height:50vh;background:#000;border-radius:12px}
+  button{width:100%;padding:22px;font-size:22px;font-weight:700;border:0;border-radius:16px;margin-top:12px;color:#fff;background:#d32f2f}
+  button.rec{background:#555} button:disabled{opacity:.4}
+  #msg{margin-top:12px;min-height:24px}
+</style>
+</head>
+<body>
+<h2>Báo sự cố – SPM</h2>
+<div id="login"></div>
+<div id="who"></div>
+<video id="v" playsinline muted></video>
+<button id="btn" disabled>BÁO SỰ CỐ</button>
+<div id="msg"></div>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+// Điền 2 giá trị này sau khi tạo OAuth Client ID và deploy Apps Script (đây không phải secret)
+const CLIENT_ID = 'DÁN_CLIENT_ID.apps.googleusercontent.com';
+const API_URL   = 'DÁN_URL_APPS_SCRIPT/exec';
+const MAX_SEC   = 60;
+let idToken = null, tokenExp = 0, rec = null, chunks = [], stream = null, tick = null;
+const $ = id => document.getElementById(id);
+const setMsg = t => $('msg').textContent = t;
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
+function parseJwt(t) {
+  const b = atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'));
+  return JSON.parse(new TextDecoder().decode(Uint8Array.from(b, c => c.charCodeAt(0))));
+}
+
+window.onload = () => {
+  google.accounts.id.initialize({ client_id: CLIENT_ID, callback: onCred, auto_select: true });
+  google.accounts.id.renderButton($('login'), { theme: 'filled_blue', size: 'large' });
+  google.accounts.id.prompt();
+};
+
+function onCred(r) {
+  idToken = r.credential;
+  const p = parseJwt(idToken);
+  tokenExp = p.exp * 1000;
+  $('who').textContent = 'Đăng nhập: ' + (p.name || p.email);
+  $('login').style.display = 'none';
+  $('btn').disabled = false;
+}
+
+async function start() {
+  if (Date.now() > tokenExp - 5 * 60 * 1000) {
+    setMsg('Phiên đăng nhập hết hạn, vui lòng đăng nhập lại.');
+    $('login').style.display = 'block';
+    google.accounts.id.prompt();
+    return;
+  }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15 } },
+      audio: true
+    });
+  } catch (e) { setMsg('Không mở được camera/micro: ' + e.message); return; }
+
+  $('v').srcObject = stream; $('v').play();
+  const mime = ['video/mp4', 'video/webm;codecs=vp8,opus', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m)) || '';
+  rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 700000, audioBitsPerSecond: 64000 } : {});
+  chunks = [];
+  rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+  rec.onstop = onStop;
+  rec.start(1000);
+
+  const t0 = Date.now();
+  $('btn').classList.add('rec'); setMsg('');
+  tick = setInterval(() => {
+    const left = MAX_SEC - Math.round((Date.now() - t0) / 1000);
+    $('btn').textContent = 'DỪNG & GỬI (' + Math.max(left, 0) + 's)';
+    if (left <= 0) stop();
+  }, 500);
+}
+
+function stop() { clearInterval(tick); if (rec && rec.state === 'recording') rec.stop(); }
+
+async function onStop() {
+  stream.getTracks().forEach(t => t.stop()); $('v').srcObject = null;
+  $('btn').disabled = true; $('btn').classList.remove('rec');
+  if (!chunks.length) { setMsg('❌ Không ghi được video.'); $('btn').disabled = false; $('btn').textContent = 'BÁO SỰ CỐ'; return; }
+  const type = (rec.mimeType || chunks[0].type || 'video/mp4').split(';')[0];
+  const blob = new Blob(chunks, { type });
+  $('btn').textContent = 'Đang gửi ' + (blob.size / 1e6).toFixed(1) + ' MB...';
+  try {
+    const b64 = await new Promise((ok, no) => {
+      const r = new FileReader(); r.onload = () => ok(r.result.split(',')[1]); r.onerror = no; r.readAsDataURL(blob);
+    });
+    const res = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                                       body: JSON.stringify({ idToken, mime: type, videoB64: b64 }) });
+    const j = await res.json();
+    setMsg(j.ok ? '✅ Đã gửi báo cáo.' : '❌ Lỗi: ' + j.error);
+  } catch (e) { setMsg('❌ Không gửi được: ' + e.message); }
+  $('btn').disabled = false; $('btn').textContent = 'BÁO SỰ CỐ';
+}
+
+$('btn').onclick = () => (rec && rec.state === 'recording') ? stop() : start();
+</script>
+</body>
+</html>
