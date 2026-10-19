@@ -3,12 +3,21 @@
  *
  * Script Properties cần thiết (Project Settings > Script Properties):
  *   GEMINI_KEY, CLIENT_ID, RECIPIENTS, ALLOWED_EMAILS, FOLDER_ID
- * Không đặt key/ID thật trong file này.
+ *   BASE_WEBHOOK_URL (tùy chọn): đường dẫn Incoming webhook của nhóm chat Base Message
+ * Không đặt key/ID/URL webhook thật trong file này.
+ *
+ * Mở địa chỉ /exec trong trình duyệt để xem VERSION đang chạy (biết đã deploy bản mới chưa).
  */
+const VERSION = '2026-10-19.3-cotH-base-retry';
 const MODEL = 'gemini-3.6-flash'; // kiểm tra model còn dùng free trong AI Studio, sai thì đổi tên
 const TZ = 'Asia/Ho_Chi_Minh';
 const MAX_B64_LEN = 14e6; // ~10 MB video
 const P = () => PropertiesService.getScriptProperties();
+
+// GET (mở /exec trên trình duyệt): chỉ trả về phiên bản đang chạy, không lộ dữ liệu nào.
+function doGet() {
+  return out_({ ok: true, version: VERSION });
+}
 
 function doPost(e) {
   try {
@@ -41,6 +50,10 @@ function doPost(e) {
     // Cột A–G giữ nguyên thứ tự cũ; cột H (mới) = lời nói gốc. Ô Sheet tối đa 50.000 ký tự nên cắt bớt.
     sheet.appendRow([when, user.name, user.email, r.dia_diem, r.loai_su_co, r.noi_dung, file.getUrl(),
                      String(r.loi_noi || '').slice(0, 40000)]);
+
+    // Báo về nhóm chat Base Message; lỗi ở đây không được làm hỏng báo cáo (email và Sheet đã xong).
+    try { notifyBase_(when, user, r, file.getUrl()); }
+    catch (err) { console.error('Base Message lỗi: ' + err.message); }
     return out_({ ok: true });
   } catch (err) {
     return out_({ ok: false, error: String(err.message || err) });
@@ -75,11 +88,21 @@ function analyze_(b64, mime) {
       }
     }
   };
-  const res = UrlFetchApp.fetch(
-    'https://generativelanguage.googleapis.com/v1beta/models/' + MODEL + ':generateContent',
-    { method: 'post', contentType: 'application/json', headers: { 'x-goog-api-key': P().getProperty('GEMINI_KEY') },
-      payload: JSON.stringify(payload), muteHttpExceptions: true });
-  if (res.getResponseCode() !== 200) throw new Error('Gemini ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
+  // Gemini thỉnh thoảng báo 503 (quá tải) hoặc 429 (hết hạn mức): thử lại tối đa 3 lần, nghỉ 2s, 4s.
+  let res, code;
+  for (let i = 0; i < 3; i++) {
+    res = UrlFetchApp.fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/' + MODEL + ':generateContent',
+      { method: 'post', contentType: 'application/json', headers: { 'x-goog-api-key': P().getProperty('GEMINI_KEY') },
+        payload: JSON.stringify(payload), muteHttpExceptions: true });
+    code = res.getResponseCode();
+    if (code !== 503 && code !== 429 && code !== 500) break;
+    if (i < 2) Utilities.sleep(2000 * (i + 1));
+  }
+  if (code !== 200) {
+    const busy = (code === 503 || code === 429 || code === 500);
+    throw new Error('Gemini ' + code + (busy ? ' (quá tải hoặc hết hạn mức, đã thử lại 3 lần)' : ': ' + res.getContentText().slice(0, 200)));
+  }
   return JSON.parse(JSON.parse(res.getContentText()).candidates[0].content.parts[0].text);
 }
 
@@ -95,6 +118,37 @@ function sendMail_(to, when, user, r, url) {
     row('Video', '<a href="' + url + '">Xem video</a>') + '</table>' +
     '<p style="color:#888">AI tự tóm tắt từ video, việc quan trọng cần xem lại video.</p>';
   MailApp.sendEmail({ to: to.join(','), subject: '[Sự cố SPM] ' + r.loai_su_co + ' – ' + r.dia_diem, htmlBody: html });
+}
+
+// Gửi tin vào nhóm chat Base Message qua "Incoming webhook integration" của nhóm.
+// Tên trường (bot_name, base_content) lấy từ tài liệu webhook Workflow -> Message của Base; tài liệu chưa nêu
+// rõ định dạng gọi trực tiếp, nên chạy testBase_() để kiểm tra, sai thì xem log và chỉnh payload ở đây.
+function notifyBase_(when, user, r, url) {
+  const hook = P().getProperty('BASE_WEBHOOK_URL');
+  if (!hook) return; // chưa cấu hình thì bỏ qua
+  const text = [
+    '**🚨 SỰ CỐ MỚI – SPM**',
+    '**Thời điểm:** ' + when,
+    '**Ai báo:** ' + user.name + ' (' + user.email + ')',
+    '**Địa điểm:** ' + r.dia_diem,
+    '**Loại sự cố:** ' + r.loai_su_co,
+    '**Nội dung:** ' + r.noi_dung,
+    '**Video:** ' + url
+  ].join('\n');
+  const res = UrlFetchApp.fetch(hook, {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify({ bot_name: 'Báo sự cố SPM', base_content: text })
+  });
+  const code = res.getResponseCode();
+  console.log('Base Message trả về ' + code + ': ' + res.getContentText().slice(0, 200));
+  if (code < 200 || code >= 300) throw new Error('Base ' + code + ': ' + res.getContentText().slice(0, 200));
+}
+
+// Chạy tay trong trình soạn thảo để thử webhook (sẽ gửi 1 tin thử vào nhóm chat). Xem kết quả ở Execution log.
+function testBase_() {
+  notifyBase_(Utilities.formatDate(new Date(), TZ, 'HH:mm dd/MM/yyyy'), { name: 'Tin thử', email: 'test@example.com' },
+    { dia_diem: 'Thử nghiệm', loai_su_co: 'Thử nghiệm', noi_dung: 'Tin thử từ ứng dụng báo sự cố, bỏ qua tin này.' },
+    'https://example.com');
 }
 
 // Chỉ tạo hàng tiêu đề khi Sheet còn trống hoàn toàn; Sheet đã có dữ liệu thì không đụng vào.
