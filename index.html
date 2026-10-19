@@ -7,10 +7,14 @@
 <meta name="theme-color" content="#d32f2f">
 <title>Báo sự cố SPM</title>
 <link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-title" content="Báo sự cố">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
 <style>
   body{font-family:system-ui,sans-serif;margin:0;padding:16px;text-align:center;background:#111;color:#fff}
-  video{width:100%;max-height:50vh;background:#000;border-radius:12px}
+  video{display:none;width:100%;max-height:50vh;background:#000;border-radius:12px}
+  video.on{display:block}
+  #hint{margin:16px 0 4px;color:#bbb;font-size:16px;line-height:1.4}
   button{width:100%;padding:22px;font-size:22px;font-weight:700;border:0;border-radius:16px;margin-top:12px;color:#fff;background:#d32f2f}
   button.rec{background:#555} button:disabled{opacity:.4}
   #msg{margin-top:12px;min-height:24px}
@@ -20,6 +24,7 @@
 <h2>Báo sự cố – SPM</h2>
 <div id="login"></div>
 <div id="who"></div>
+<div id="hint">Bấm nút đỏ để quay video báo sự cố (tối đa 60 giây). Vừa quay vừa nói rõ vị trí và sự cố.</div>
 <video id="v" playsinline muted></video>
 <button id="btn" disabled>BÁO SỰ CỐ</button>
 <div id="msg"></div>
@@ -69,7 +74,8 @@ async function start() {
     });
   } catch (e) { setMsg('Không mở được camera/micro: ' + e.message); return; }
 
-  $('v').srcObject = stream; $('v').play();
+  $('v').srcObject = stream; $('v').classList.add('on'); $('hint').style.display = 'none';
+  $('v').play().catch(() => {});
   const mime = ['video/mp4', 'video/webm;codecs=vp8,opus', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m)) || '';
   rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 700000, audioBitsPerSecond: 64000 } : {});
   chunks = [];
@@ -90,6 +96,7 @@ function stop() { clearInterval(tick); if (rec && rec.state === 'recording') rec
 
 async function onStop() {
   stream.getTracks().forEach(t => t.stop()); $('v').srcObject = null;
+  $('v').classList.remove('on'); $('hint').style.display = 'block';
   $('btn').disabled = true; $('btn').classList.remove('rec');
   if (!chunks.length) { setMsg('❌ Không ghi được video.'); $('btn').disabled = false; $('btn').textContent = 'BÁO SỰ CỐ'; return; }
   const type = (rec.mimeType || chunks[0].type || 'video/mp4').split(';')[0];
