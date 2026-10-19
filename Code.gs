@@ -36,8 +36,11 @@ function doPost(e) {
     }
 
     sendMail_(to, when, user, r, file.getUrl());
-    SpreadsheetApp.getActiveSpreadsheet().getSheets()[0]
-      .appendRow([when, user.name, user.email, r.dia_diem, r.loai_su_co, r.noi_dung, file.getUrl()]);
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
+    ensureHeader_(sheet);
+    // Cột A–G giữ nguyên thứ tự cũ; cột H (mới) = lời nói gốc. Ô Sheet tối đa 50.000 ký tự nên cắt bớt.
+    sheet.appendRow([when, user.name, user.email, r.dia_diem, r.loai_su_co, r.noi_dung, file.getUrl(),
+                     String(r.loi_noi || '').slice(0, 40000)]);
     return out_({ ok: true });
   } catch (err) {
     return out_({ ok: false, error: String(err.message || err) });
@@ -92,6 +95,14 @@ function sendMail_(to, when, user, r, url) {
     row('Video', '<a href="' + url + '">Xem video</a>') + '</table>' +
     '<p style="color:#888">AI tự tóm tắt từ video, việc quan trọng cần xem lại video.</p>';
   MailApp.sendEmail({ to: to.join(','), subject: '[Sự cố SPM] ' + r.loai_su_co + ' – ' + r.dia_diem, htmlBody: html });
+}
+
+// Chỉ tạo hàng tiêu đề khi Sheet còn trống hoàn toàn; Sheet đã có dữ liệu thì không đụng vào.
+function ensureHeader_(sheet) {
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(['Thời điểm', 'Ai báo', 'Email', 'Địa điểm', 'Loại sự cố', 'Nội dung', 'Video', 'Lời nói gốc']);
+    sheet.setFrozenRows(1);
+  }
 }
 
 function out_(o) {

@@ -28,6 +28,10 @@ Không commit key hay ID thật vào repo. `CLIENT_ID` và `API_URL` trong `inde
 5. Dán `CLIENT_ID` vào `index.html`, bật GitHub Pages cho repo (icon mẫu đã có sẵn, thay bằng logo SPM nếu muốn).
 6. Android: Chrome, iPhone: Safari, chọn "Thêm vào màn hình chính".
 
+## Các cột trong Google Sheet
+A Thời điểm · B Ai báo · C Email · D Địa điểm · E Loại sự cố · F Nội dung · G Link video · H Lời nói gốc (AI chép lại nguyên văn).
+Sheet đã có dữ liệu cũ thì cột H chỉ có từ dòng mới trở đi; tự gõ tiêu đề "Lời nói gốc" vào ô H1 nếu hàng 1 là tiêu đề.
+
 ## Rủi ro cần kiểm chứng
 1. iPhone/Safari có thể bỏ qua bitrate, file nặng hơn dự kiến: đo dung lượng thật của 60s trên cả 2 loại máy.
 2. Giới hạn kích thước POST của Apps Script chưa rõ: code đang chặn ở ~14 MB base64 (~10 MB video). Nếu bị từ chối sớm hơn, hạ bitrate hoặc đổi sang Google Form + Apps Script trigger.
